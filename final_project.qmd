@@ -1,12 +1,24 @@
 ---
 title: "final_project"
-format: html
-editor: visual
+author: "Ryan Green"
+date: 12/10/24
+execute:
+  warning: false
+  message: false
+  results: hide
+  enabled: true
+categories: [Chumash, R, EDS222, Logistic Regression]
+output:
+  distill::distill_article:
+    self_contained: false
+    toc: true
+    toc_float: true
+image: pictures/thumbnail.png
 editor_options: 
   chunk_output_type: console
 ---
 
-```{r, Libraries}
+```{r, Libraries, results='hide'}
 library(sf)
 library(here)
 library(tmap)
@@ -19,9 +31,7 @@ library(spdep)
 
 ## Reading in Data
 
-```{r, Read in Data}
-rm(list = ls())
-
+```{r, Read in Data, results='hide'}
 # Creeks
 channel_islands_creeks <- st_read(here("data", "NHD_H_18060014_HU8_Shape", "Shape", "NHDFlowline.shp"))
 creeks <- st_read(here("data", "NHD_H_18060013_HU8_Shape", "Shape", "NHDFlowline.shp"))
@@ -42,23 +52,19 @@ rm(tif1, tif2, tif3, tif4)
 
 ## Creating Extents and Cropping Rasters
 
-```{r, Cropping Rasters}
+```{r, Cropping Rasters, results='hide'}
 # Creating extents
-channel_islands_extent <- ext(-120.51, -119.28, 33.86, 34.15)
 santa_barbara_extent <- ext(-120.14, -119.37, 34.31, 34.57)
 point_conception_extent <- ext(-120.525807, -120.338867, 34.43, 34.521897)
-large_extent <- ext(-120.93, -118.89, 33.79, 35.05)
 
 # Cropping rasters using extents
-channel_islands_map_rast <- terra::crop(elevation_raster, channel_islands_extent)
 santa_barbara_map_rast <- terra::crop(elevation_raster, santa_barbara_extent)
 point_conception_map_rast <- terra::crop(elevation_raster, point_conception_extent)
-large_extent_rast <- terra::crop(elevation_raster, large_extent)
 ```
 
 ## Data for Point Conception Archaeological Sites
 
-```{r, Actual Archaeological Site Locations, Point Conception}
+```{r, Actual Archaeological Site Locations, Point Conception, results='hide'}
 # Establishing dataframes of coordinates for each point (site)
 early_sites <- data.frame(
   lon = c(-120.478075, -120.464917, -120.472431, -120.423728),
@@ -100,7 +106,7 @@ all_sites$presence <- 1
 
 ## Extracting Elevations and Distance to Water Sources for All Sites
 
-```{r, Finding Site Elevations}
+```{r, Finding Site Elevations, results='hide'}
 # Creating a SpatVector object out of sites shapefile
 points_vect <- vect(all_sites)
 
@@ -114,7 +120,7 @@ all_sites$elevation_m <- extracted$USGS_1_n35w121_20210301
 rm(points_vect, extracted)
 ```
 
-```{r, Finding Site Distance to Water}
+```{r, Finding Site Distance to Water, results='hide'}
 # Establishing function to calculate distance to Creeks shapefile for each point
 creeks_nozm <- st_zm(creeks, drop = TRUE, what = "ZM")
 
@@ -193,9 +199,9 @@ pc_sites_map
 
 ## Creating Absence Points
 
-```{r, Absence Points, Point Conception}
+```{r, Absence Points, Point Conception, results='hide'}
 # Sampling 2,000 points from the Point Conception Map
-set.seed(420)
+set.seed(123)
 absence_points <- spatSample(point_conception_map_rast, size = 2000, method = "regular", as.points = TRUE)
 
 # Extracting the elevations of every point
@@ -231,16 +237,13 @@ rm(absence_points, extracted_absence_sb)
 ```
 
 ```{r, Logistic Regression Models}
-# Fitting logistic regression model, using `water_proximity` directly
-logit_mod_water <- glm(presence ~ elevation_m + water_proximity, data = all_sites, family = binomial)
-
 # Fitting logistic regression model, using transformed `water_proximity`
-logit_mod_transform <- glm(presence ~ elevation_m + sqrt(water_proximity), 
+logit_mod <- glm(presence ~ elevation_m + sqrt(water_proximity), 
                  data = all_sites, 
                  family = binomial)
 
 # Extracting the residuals
-all_sites$residual <- resid(logit_mod_transform)
+all_sites$residual <- resid(logit_mod)
 
 # Creating a spatial weights matrix
 all_sites_sf <- st_as_sf(all_sites, coords = c("longitude", "latitude"), crs = 4269)
@@ -251,16 +254,15 @@ all_sites_lw <- nb2listw(all_sites_nb, style = "W")
 lag_elevation <- lag.listw(all_sites_lw, all_sites$elevation_m)
 
 # Fitting logistic regression model with the spatially lagged variable
-logit_mod_transform_spatial <- glm(presence ~ elevation_m + sqrt(water_proximity) + lag_elevation, 
+logit_mod_spatial <- glm(presence ~ elevation_m + sqrt(water_proximity) + lag_elevation, 
                          data = all_sites, 
                          family = binomial)
 
 # Adding the predicted probability to all_sites
-all_sites$predicted_prob <- predict(logit_mod_transform_spatial, type = "response")
+all_sites$predicted_prob <- predict(logit_mod_spatial, type = "response")
 
 # Model summary
-summary(logit_mod_water)
-summary(logit_mod_transform_spatial)
+summary(logit_mod_spatial)
 
 ```
 
@@ -339,69 +341,86 @@ pc_predicted_map
 
 # Applying the model to SB
 
-```{r, Generating Points for Hypothetical Sites in Santa Barbara Area}
-set.seed(420)
+```{r, Generating Points for Hypothetical Sites in Santa Barbara Area, results='hide'}
+# Generating random points
+set.seed(123)
 hypo_sites <- spatSample(santa_barbara_map_rast, size = 20000, method = "regular", as.points = TRUE)
 ```
 
-```{r, Extracting Elevations for Hypothetical Sites}
+```{r, Extracting Elevations for Hypothetical Sites, results='hide'}
+# Transforming to shapefile
 hypo_sites <- st_as_sf(hypo_sites)
 
+# Vectorizing
 hypo_points <- vect(hypo_sites)
 
+# Extracting elevations
 extracted <- terra::extract(elevation_raster, hypo_points)
-
 hypo_sites$elevation_m <- extracted$USGS_1_n35w121_20210301
 
+# Filtering any elevation less than 1
 hypo_sites <- hypo_sites %>%
   filter(elevation_m >= 1)
 ```
 
-```{r, Calculating Distance to Creeks for Hypothetical Sites}
+```{r, Calculating Distance to Creeks for Hypothetical Sites, results='hide'}
+# Caulculating distance to creeks
 hypo_sites$water_proximity <- as.numeric(nngeo::st_nn(hypo_sites, 
                                                      creeks_nozm, 
                                                      k = 1, 
                                                      returnDist = TRUE)$dist)
 ```
 
-```{r, Arranging Hypothetical Sites Dataframe}
+```{r, Arranging Hypothetical Sites Dataframe, results='hide'}
+# Setting values for presence and age
 hypo_sites$presence <- 0
 hypo_sites$age <- NA
 
+# Converting to shapefile
 hypo_sites <- st_as_sf(hypo_sites)
 
+# Remove unneccesary column, filter to elevation > 1m, water_proximity <= 2000m
 hypo_sites <- hypo_sites %>%
   filter(elevation_m >= 1) %>%
   select(-USGS_1_n35w121_20210301) %>%
   filter(water_proximity <= 2000)
 ```
 
-```{r, Presence and Presence Threshold for Hypothetical Sites}
+```{r, Presence and Presence Threshold for Hypothetical Sites, results='hide'}
+# Setting presence values to integers
 hypo_sites$presence <- as.integer(hypo_sites$presence)
 
+# Assigning presence value of 1 (present) to values within 10 meters of the mean elevation of the actual Point Conception sites
 hypo_sites$presence <- ifelse(hypo_sites$elevation_m >= 32 & hypo_sites$elevation_m <= 52, 1, 0)
 ```
 
 ```{r, Logit Model for Hypothetical Sites}
-logit_transform_hypo <- glm(presence ~ elevation_m + sqrt(water_proximity), 
+# Fitting logistic regression model, using transformed `water_proximity`
+logit_hypo <- glm(presence ~ elevation_m + sqrt(water_proximity),
                  data = hypo_sites, 
                  family = binomial)
 
-hypo_sites$residual <- resid(logit_transform_hypo)
+# Extracting the residuals
+hypo_sites$residual <- resid(logit_hypo)
 
+# Creating a spatial weights matrix
 hypo_sites_sf <- st_as_sf(hypo_sites, coords = c("longitude", "latitude"), crs = 4269)
 hypo_sites_nb <- dnearneigh(hypo_sites_sf, d1 = 0, d2 = 50)
 hypo_sites_lw <- nb2listw(hypo_sites_nb, style = "W")
 
+# Creating a spatial lag of the independent variable
 lag_elevation <- lag.listw(hypo_sites_lw, hypo_sites$elevation_m)
 
-logit_transform_hypo_spatial <- glm(presence ~ elevation_m + sqrt(water_proximity) + lag_elevation, 
+# Fitting logistic regression model with the spatially lagged variable
+logit_hypo_spatial <- glm(presence ~ elevation_m + sqrt(water_proximity) + lag_elevation, 
                          data = hypo_sites, 
                          family = binomial)
 
-summary(logit_transform_hypo_spatial)
+# Adding the predicted probability to all_sites
+hypo_sites$predicted_prob <- predict(logit_hypo_spatial, type = "response")
 
-hypo_sites$predicted_prob <- predict(logit_transform_hypo_spatial, type = "response")
+# Model summary
+summary(logit_hypo_spatial)
 ```
 
 ```{r, Hypothetical Sites Presence ~ Elevation}
